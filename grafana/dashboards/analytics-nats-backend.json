@@ -1,0 +1,200 @@
+{
+  "uid": "analytics-nats-backend",
+  "title": "Analytics Service - Backend & NATS JetStream",
+  "tags": ["analytics", "go", "nats"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    { "id": 100, "type": "row", "title": "Ingestión HTTP", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "collapsed": false },
+    {
+      "id": 1, "type": "stat", "title": "Peticiones HTTP por segundo",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(analytics_http_requests_total[1m]))" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "area" }
+    },
+    {
+      "id": 2, "type": "stat", "title": "Eventos publicados en JetStream / s",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(analytics_nats_published_total[1m]))" }],
+      "fieldConfig": { "defaults": { "unit": "ops", "decimals": 2 }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "graphMode": "area" }
+    },
+    {
+      "id": 3, "type": "stat", "title": "Respuestas 4xx/5xx por segundo",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(analytics_http_requests_total{code=~\"4..|5..\"}[1m])) or vector(0)" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps", "decimals": 2, "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 0.1 }, { "color": "red", "value": 5 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 4, "type": "stat", "title": "Errores de publicación en NATS / s",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 1 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(analytics_nats_publish_errors_total[1m]))" }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops", "decimals": 2, "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 0.01 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "id": 5, "type": "timeseries", "title": "RPS por endpoint",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (path) (rate(analytics_http_requests_total[1m]))", "legendFormat": "{{path}}" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] } }
+    },
+    {
+      "id": 6, "type": "timeseries", "title": "Peticiones por código de estado",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (code) (rate(analytics_http_requests_total[1m]))", "legendFormat": "{{code}}" }],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "stacking": { "mode": "normal" }, "fillOpacity": 30 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+
+    { "id": 101, "type": "row", "title": "NATS JetStream", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 14 }, "collapsed": false },
+    {
+      "id": 7, "type": "timeseries", "title": "Publicados vs. consumidos (msg/s)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(analytics_nats_published_total[1m]))", "legendFormat": "publicados" },
+        { "refId": "B", "expr": "sum(rate(analytics_nats_consumed_total[1m]))", "legendFormat": "consumidos (insertados + ack)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 8, "type": "timeseries", "title": "Cola: mensajes pendientes y en vuelo",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 15 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "analytics_nats_pending_messages", "legendFormat": "pendientes (backlog)" },
+        { "refId": "B", "expr": "analytics_nats_ack_pending_messages", "legendFormat": "entregados sin ack" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 9, "type": "timeseries", "title": "Errores del consumer (por segundo)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 23 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(analytics_nats_insert_errors_total[1m]))", "legendFormat": "errores de inserción" },
+        { "refId": "B", "expr": "sum(rate(analytics_nats_decode_errors_total[1m]))", "legendFormat": "errores de decodificación" },
+        { "refId": "C", "expr": "sum(rate(analytics_nats_publish_errors_total[1m]))", "legendFormat": "errores de publicación" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+
+    { "id": 102, "type": "row", "title": "Dead Letter Queue", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 31 }, "collapsed": false },
+    {
+      "id": 10, "type": "stat", "title": "Eventos en la DLQ (total)",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(analytics_dlq_messages_total) or vector(0)", "instant": true }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short", "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "orange", "value": 1 }, { "color": "red", "value": 10 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "id": 11, "type": "stat", "title": "Fallos al publicar en la DLQ",
+      "description": "Si es > 0 el mensaje original NO se confirma y se reintenta.",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(analytics_dlq_publish_errors_total) or vector(0)", "instant": true }],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short", "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "red", "value": 1 }] }
+        },
+        "overrides": []
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "id": 12, "type": "bargauge", "title": "DLQ por motivo (total)",
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 32 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (reason) (analytics_dlq_messages_total)", "legendFormat": "{{reason}}", "instant": true }],
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "color": { "mode": "palette-classic" } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal", "displayMode": "gradient" }
+    },
+    {
+      "id": 13, "type": "timeseries", "title": "Eventos enviados a la DLQ por motivo (por 5 min)",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 38 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum by (reason) (increase(analytics_dlq_messages_total[5m]))", "legendFormat": "{{reason}}" }],
+      "fieldConfig": { "defaults": { "unit": "short", "custom": { "drawStyle": "bars", "fillOpacity": 60 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+
+    { "id": 103, "type": "row", "title": "Rendimiento del consumer y batch inserts (PostgreSQL)", "gridPos": { "h": 1, "w": 24, "x": 0, "y": 46 }, "collapsed": false },
+    {
+      "id": 14, "type": "timeseries", "title": "Tiempo de inserción por lote p50 / p95 / p99",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 47 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(analytics_nats_batch_insert_duration_seconds_bucket[1m])))", "legendFormat": "p50" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(analytics_nats_batch_insert_duration_seconds_bucket[1m])))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(analytics_nats_batch_insert_duration_seconds_bucket[1m])))", "legendFormat": "p99" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 15, "type": "timeseries", "title": "Tamaño de lote (media y p95)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 47 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(analytics_nats_batch_size_sum[1m])) / sum(rate(analytics_nats_batch_size_count[1m]))", "legendFormat": "media" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(analytics_nats_batch_size_bucket[1m])))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 16, "type": "timeseries", "title": "Lotes insertados por segundo",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 55 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [{ "refId": "A", "expr": "sum(rate(analytics_nats_batch_insert_duration_seconds_count[1m]))", "legendFormat": "lotes/s" }],
+      "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    },
+    {
+      "id": 17, "type": "timeseries", "title": "Latencia p95 de POST /api/events (publicación + ack de JetStream)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 55 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(analytics_http_request_duration_seconds_bucket{path=\"/api/events\"}[1m])))", "legendFormat": "p95" },
+        { "refId": "B", "expr": "histogram_quantile(0.50, sum by (le) (rate(analytics_http_request_duration_seconds_bucket{path=\"/api/events\"}[1m])))", "legendFormat": "p50" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } }
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: analytics
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  nats:
+    image: nats:2-alpine
+    command: ["-js", "-sd", "/data", "-m", "8222"]
+    ports:
+      - "4222:4222" # clientes
+      - "8222:8222" # monitorización HTTP
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8222/healthz?js-enabled-only=true"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  minio:
+    # minio/minio ya no se publica en Docker Hub; sobreescribe MINIO_IMAGE si usas otro registro.
+    image: ${MINIO_IMAGE:-cgr.dev/chainguard/minio:latest}
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "9000:9000" # API S3
+      - "9001:9001" # consola web
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /minio/health/live HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && read -r l <&3 && [[ $${l} == *200* ]]"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      # Vacío = sin autenticación. Si defines API_KEY, Prometheus no podrá
+      # hacer scrape de /metrics sin configurar la cabecera X-API-Key.
+      API_KEY: ${API_KEY:-}
+      # Claves por tenant: "clave1:tenantA,clave2:tenantB" (vacío = solo API_KEY / sin auth)
+      TENANT_API_KEYS: ${TENANT_API_KEYS:-}
+      # Token de solo lectura para /ws (además de API_KEY); apto para el navegador
+      WS_TOKEN: ${WS_TOKEN:-}
+      RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-20}
+      RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-40}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: analytics
+      POSTGRES_SSLMODE: disable
+      NATS_URL: nats://nats:4222
+      NATS_STREAM: EVENTS
+      NATS_MAX_DELIVER: ${NATS_MAX_DELIVER:-3}
+      NATS_DLQ_SUBJECT: analytics.dlq
+      BATCH_SIZE: ${BATCH_SIZE:-500}
+      BATCH_FLUSH_INTERVAL: ${BATCH_FLUSH_INTERVAL:-1s}
+      DB_BREAKER_FAILURES: ${DB_BREAKER_FAILURES:-2}
+      DB_BREAKER_OPEN_TIMEOUT: ${DB_BREAKER_OPEN_TIMEOUT:-15s}
+      DB_BREAKER_SLOW_THRESHOLD: ${DB_BREAKER_SLOW_THRESHOLD:-5s}
+      DEDUP_TTL: ${DEDUP_TTL:-10m}
+      DEDUP_MAX_ENTRIES: ${DEDUP_MAX_ENTRIES:-100000}
+      SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-25s}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+      # Data lake: exportación periódica a Parquet (vacío S3_ENDPOINT = desactivada).
+      # Las credenciales por defecto son solo de desarrollo: define S3_ACCESS_KEY/S3_SECRET_KEY reales.
+      S3_ENDPOINT: ${S3_ENDPOINT:-minio:9000}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
+      S3_BUCKET: ${S3_BUCKET:-analytics-lake}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_USE_SSL: ${S3_USE_SSL:-false}
+      S3_PREFIX: ${S3_PREFIX:-}
+      EXPORT_INTERVAL: ${EXPORT_INTERVAL:-5m}
+      EXPORT_BATCH_SIZE: ${EXPORT_BATCH_SIZE:-50000}
+      EXPORT_LAG: ${EXPORT_LAG:-30s}
+      EXPORT_RETRY_ATTEMPTS: ${EXPORT_RETRY_ATTEMPTS:-5}
+    stop_grace_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Se incrustan en el bundle (públicos): usa WS_TOKEN y una clave de tenant, no la de administración
+        VITE_WS_TOKEN: ${WS_TOKEN:-}
+        VITE_INGEST_API_KEY: ${FRONTEND_INGEST_KEY:-}
+        VITE_TENANT_ID: ${FRONTEND_TENANT_ID:-}
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3002:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  nats-data:
+  minio-data:
+  postgres-data:
+  prometheus-data:
+  grafana-data:

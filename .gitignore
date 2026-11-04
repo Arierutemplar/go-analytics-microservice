@@ -1,0 +1,4 @@
+# Base de datos local y logs
+events.jsonl
+*.log
+logs/
