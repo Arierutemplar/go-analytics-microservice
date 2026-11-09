@@ -440,11 +440,3 @@ La app queda en [http://localhost:3000](http://localhost:3000).
 | `npm run start` | Sirve el build anterior |
 
 Los datos de uso, claves y completaciones salen de `voke/lib/api.ts`. No hace falta un backend para recorrer el dashboard.
-
-<div align="center">
-  <img src="assets/screenshots/Captura de pantalla (3268).png" width="48%" alt="" />
-  <img src="assets/screenshots/Captura de pantalla (3269).png" width="48%" alt="" />
-  <br/><br/>
-  <img src="assets/screenshots/Captura de pantalla (3270).png" width="48%" alt="" />
-  <img src="assets/screenshots/Captura de pantalla (3271).png" width="48%" alt="" />
-</div>
