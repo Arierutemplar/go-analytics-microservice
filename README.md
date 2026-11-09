@@ -4,6 +4,48 @@ A high-concurrency Go microservice that accepts multi-tenant product events over
 
 Under Docker Compose the default path is **HTTP → NATS JetStream → a batch consumer → PostgreSQL**, with a background exporter writing Apache Parquet to MinIO. With `NATS_URL` unset, the process falls back to an in-memory worker pool so the API can run with nothing but the Go binary.
 
+## 🚀 Guía de Ejecución Rápida
+
+El stack local se levanta con Docker Compose. Las imágenes del API y del dashboard se construyen en el propio proyecto. No hace falta un archivo `.env`: cada variable tiene un valor por defecto pensado para desarrollo local. Si quieres cambiar credenciales o límites, exporta las variables antes de `up` o colócalas en un `.env` en la raíz (`GRAFANA_USER`, `GRAFANA_PASSWORD`, `API_KEY`, `WS_TOKEN`, `FRONTEND_INGEST_KEY`, `FRONTEND_TENANT_ID`).
+
+```bash
+git clone https://github.com/Arierutemplar/go-analytics-microservice.git
+cd go-analytics-microservice
+docker compose up -d --build
+```
+
+`--build` reconstruye el API y el frontend la primera vez. Los arranques siguientes pueden omitirlo.
+
+### Servicios y Puertos Expuestos
+
+Los puertos de la izquierda son los del host. Dentro de la red de Compose los servicios se hablan por su nombre y por el puerto del contenedor (`backend:8080`, `prometheus:9090`), no por estos mapeos.
+
+| Servicio | URL en el host | Notas |
+| --- | --- | --- |
+| Frontend (Dashboard) | http://localhost:8085 | Nginx sirve el bundle de Vite |
+| Backend (Go API) | http://localhost:8088 | El proceso escucha en `:8080` dentro del contenedor |
+| Grafana (Observabilidad) | http://localhost:3005 | Credenciales: `admin` / `admin` |
+| Prometheus | http://localhost:9092 | Scrapea `backend:8080/metrics` |
+| PostgreSQL | `localhost:5433` | Base `analytics`, usuario y contraseña `postgres` |
+| NATS JetStream | `localhost:4222` / `localhost:8222` | Clientes en 4222, monitor HTTP en 8222 |
+| MinIO | `localhost:9000` / `localhost:9001` | API S3 y consola web. Local: `minioadmin` / `minioadmin` |
+
+### Verificación del Entorno
+
+Cuando los healthchecks terminan, todos los servicios deben figurar como `healthy`:
+
+```bash
+docker compose ps
+```
+
+La API publica métricas de Prometheus en el puerto del host:
+
+```bash
+curl http://localhost:8088/metrics
+```
+
+Una respuesta `200` con texto Prometheus confirma que el backend acepta tráfico desde el host. `/health` en el mismo origen comprueba la vida del proceso.
+
 ## Key Architectural Highlights
 
 Dependencies point inward. `internal/domain` holds entities and ports; everything else is an adapter.
@@ -144,10 +186,10 @@ $env:RATE_LIMIT_RPS="50000"; $env:RATE_LIMIT_BURST="100000"; docker compose up -
 & "$env:ProgramFiles\k6\k6.exe" run scripts/k6-test.js
 ```
 
-Optional `-e` variables: `BASE_URL` (default `http://localhost:8080`), `API_KEY` (`X-API-Key`), `TENANT_ID` (`X-Tenant-ID`).
+Optional `-e` variables: `BASE_URL` (Compose publishes the API at `http://localhost:8088`; the script falls back to `http://localhost:8080` if unset), `API_KEY` (`X-API-Key`), `TENANT_ID` (`X-Tenant-ID`).
 
 ```bash
-k6 run -e BASE_URL=http://localhost:8080 -e API_KEY=my-key -e TENANT_ID=acme scripts/k6-test.js
+k6 run -e BASE_URL=http://localhost:8088 -e API_KEY=my-key -e TENANT_ID=acme scripts/k6-test.js
 ```
 
 `setup()` fails the test if `GET /health` is not 200. After the run, JetStream is still the buffer: wait until `analytics_nats_pending_messages` is 0, then compare accepted ids with PostgreSQL.
@@ -199,23 +241,23 @@ Every service should become healthy: Postgres, NATS, MinIO, the Go API, Nginx, P
 Smoke test:
 
 ```bash
-curl -X POST http://localhost:8080/api/events \
+curl -X POST http://localhost:8088/api/events \
   -H "Content-Type: application/json" \
   -d '{"id":"evt-1","event_type":"click","user_id":"u-42","payload":"checkout"}'
-curl http://localhost:8080/api/metrics
-curl http://localhost:8080/health
-curl http://localhost:8080/ready
+curl http://localhost:8088/api/metrics
+curl http://localhost:8088/health
+curl http://localhost:8088/ready
 ```
 
 | Surface | Host URL | Notes |
 |---|---|---|
-| React dashboard | http://localhost | Nginx, multi-stage Node build. Vite dev server is `npm run dev` on port 5173. |
-| Go API | http://localhost:8080 | `/health` liveness, `/ready` fails during shutdown |
+| React dashboard | http://localhost:8085 | Nginx, multi-stage Node build. Vite dev server is `npm run dev` on port 5173. |
+| Go API | http://localhost:8088 | `/health` liveness, `/ready` fails during shutdown |
 | PostgreSQL | `localhost:5433` | Database `analytics`, user/password `postgres` / `postgres` |
 | NATS | `localhost:4222`, monitor `localhost:8222` | JetStream file store on volume `nats-data` |
 | MinIO | API `localhost:9000`, console `localhost:9001` | `minioadmin` / `minioadmin` for local only |
-| Prometheus | http://localhost:9091 | Scrapes `backend:8080/metrics` every 15s, 15-day retention |
-| Grafana | http://localhost:3002 | `admin` / `admin` unless `GRAFANA_USER` / `GRAFANA_PASSWORD` are set. Folder **Analytics**. |
+| Prometheus | http://localhost:9092 | Scrapes `backend:8080/metrics` every 15s, 15-day retention |
+| Grafana | http://localhost:3005 | `admin` / `admin` unless `GRAFANA_USER` / `GRAFANA_PASSWORD` are set. Folder **Analytics**. |
 
 Networks: `data` (internal) holds Postgres, NATS, MinIO, and the API; `observability` holds the API, Prometheus, and Grafana; `edge` holds the dashboard. Volumes: `postgres-data`, `nats-data`, `minio-data`, `prometheus-data`, `grafana-data`.
 
@@ -386,3 +428,11 @@ La app queda en [http://localhost:3000](http://localhost:3000).
 | `npm run start` | Sirve el build anterior |
 
 Los datos de uso, claves y completaciones salen de `voke/lib/api.ts`. No hace falta un backend para recorrer el dashboard.
+
+<div align="center">
+  <img src="assets/screenshots/Captura de pantalla (3268).png" width="48%" alt="" />
+  <img src="assets/screenshots/Captura de pantalla (3269).png" width="48%" alt="" />
+  <br/><br/>
+  <img src="assets/screenshots/Captura de pantalla (3270).png" width="48%" alt="" />
+  <img src="assets/screenshots/Captura de pantalla (3271).png" width="48%" alt="" />
+</div>

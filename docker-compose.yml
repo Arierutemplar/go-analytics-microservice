@@ -70,7 +70,7 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8080:8080"
+      - "8088:8080"
     environment:
       # Empty = auth off. If API_KEY is set, Prometheus cannot scrape /metrics
       # unless the scrape config sends X-API-Key.
@@ -147,7 +147,7 @@ services:
         VITE_INGEST_API_KEY: ${FRONTEND_INGEST_KEY:-}
         VITE_TENANT_ID: ${FRONTEND_TENANT_ID:-}
     ports:
-      - "80:80"
+      - "8085:80"
     depends_on:
       backend:
         condition: service_healthy
@@ -164,7 +164,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     ports:
-      - "9091:9090"
+      - "9092:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
@@ -189,7 +189,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3002:3000"
+      - "3005:3000"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
