@@ -2,3 +2,8 @@
 events.jsonl
 *.log
 logs/
+
+# Voke console
+voke/node_modules
+voke/.next
+voke/out

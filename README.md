@@ -312,3 +312,77 @@ Fixed in code: listen address `:8080`, direct-mode queue length 1000, direct-mod
 - Tenant keys authorize ingest only. Summary and history are a global operator view.
 - `events` is not purged after export. Plan a retention or partition policy before the table is the bottleneck.
 - Replace the database by implementing `domain.BatchEventRepository` and returning it from `newEventRepository` in `cmd/api/main.go`.
+
+## Voke API Frontend Dashboard
+
+Cliente de desarrollo y panel de métricas para **Voke**, un proxy compatible con OpenAI. La interfaz concentra un sitio de producto, un playground de alta fidelidad y una consola de uso, con la marca visual Violet Neon: fondo profundo y acentos violeta que se leen igual en modo oscuro y en modo claro.
+
+### Stack tecnológico
+
+| Capa | Elección |
+| --- | --- |
+| Framework | Next.js (App Router) y TypeScript estricto |
+| UI | React 19, Tailwind CSS 4, primitivos Radix |
+| Datos | TanStack Query y TanStack Table |
+| Diseño | Patrones de Aceternity UI y Magic UI implementados en el propio código: lámpara cónica, grid de fondo y Shine Border |
+
+La paleta de referencia es un negro profundo `#09090b` con acentos `#643d88` y `#d9b0ff`. Esos valores viven en las variables de `voke/app/globals.css` y en el brillo por defecto de `ShineBorder`. El modo claro usa una superficie `#fafafa` y un violeta más oscuro para conservar contraste.
+
+### Características clave
+
+#### Sistema de iluminación y lámpara
+
+Bajo la navegación de marketing, `HeaderLamp` proyecta un haz cónico violeta. Dos degradados cónicos opuestos salen de una barra neón (`#d9b0ff`) y se disuelven sobre el grid, sin un recuadro opaco detrás. El contenedor es transparente y no intercepta el puntero.
+
+#### Modo oscuro y modo claro
+
+El switch del header usa `next-themes` con la clase en `<html>`, tema oscuro por defecto y persistencia en el navegador. El estado marcado es el modo oscuro. Textos, tarjetas, gráficos y el toaster cambian con los tokens de color. No hace falta recargar la página.
+
+#### Dev-Indicator (botón N)
+
+En desarrollo, el badge de Next.js se reestiliza dentro de su shadow DOM. Es un disco circular con relieve neumórfico: grafito `#18181b` en oscuro y `#e8e8e8` en claro. La letra N permanece en violeta neón. El menú (Route, Bundler, Route Info, Preferences) sigue el tema oscuro de la app. En una build de producción el indicador no se monta.
+
+#### Microinteracciones y widgets
+
+La ventana de código del inicio tiene dos filas de chips: lenguajes (JavaScript, Python, cURL) y modelos (`voke/auto`, `openai/gpt-4.1`, y el resto del catálogo). Los chips inactivos usan cursor de puntero y un hover violeta. Las tarjetas principales llevan Shine Border, el único trazo animado del panel. La consola añade el playground con editor, la gestión de API keys y el resumen de uso.
+
+### Estructura del proyecto
+
+```text
+voke/
+├── app/
+│   ├── (marketing)/          # Inicio, precios y matriz de modelos
+│   ├── (dashboard)/          # /overview, /api-keys, /playground
+│   ├── globals.css           # Tokens, lámpara, neón y switch
+│   └── layout.tsx
+├── components/
+│   ├── ui/                   # Lámpara, Shine Border, grid, controles
+│   ├── shared/               # Shell, tema, proveedores, logo
+│   ├── marketing/
+│   └── dashboard/
+├── lib/                      # API mock, precios, snippets, modelos
+└── types/
+```
+
+Las rutas de App Router se quedan en `voke/app/`. Lo reutilizable vive en `voke/components/ui/`. El dominio de producto está en `marketing/` y `dashboard/`.
+
+### Instalación y ejecución
+
+Requisitos: Node.js 20.9 o superior.
+
+```bash
+cd voke
+npm install
+npm run dev
+```
+
+La app queda en [http://localhost:3000](http://localhost:3000).
+
+| Comando | Uso |
+| --- | --- |
+| `npm run dev` | Servidor de desarrollo |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run build` | Build de producción |
+| `npm run start` | Sirve el build anterior |
+
+Los datos de uso, claves y completaciones salen de `voke/lib/api.ts`. No hace falta un backend para recorrer el dashboard.

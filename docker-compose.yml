@@ -1,3 +1,9 @@
+# Production-shaped local stack.
+# Networks: data (internal) for stateful services, observability for scrape/UI,
+# edge for the dashboard. Host port mappings still work on the internal network.
+# Images for the Go API and the React UI are multi-stage builds (see Dockerfile
+# and frontend/Dockerfile): static CGO-free binary, nginx serving the Vite bundle.
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -9,6 +15,8 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - postgres-data:/var/lib/postgresql/data
+    networks:
+      - data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d analytics"]
       interval: 5s
@@ -21,10 +29,12 @@ services:
     image: nats:2-alpine
     command: ["-js", "-sd", "/data", "-m", "8222"]
     ports:
-      - "4222:4222" # clientes
-      - "8222:8222" # monitorización HTTP
+      - "4222:4222" # clients
+      - "8222:8222" # HTTP monitoring
     volumes:
       - nats-data:/data
+    networks:
+      - data
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8222/healthz?js-enabled-only=true"]
       interval: 5s
@@ -34,17 +44,19 @@ services:
     restart: unless-stopped
 
   minio:
-    # minio/minio ya no se publica en Docker Hub; sobreescribe MINIO_IMAGE si usas otro registro.
+    # minio/minio is no longer published on Docker Hub; override MINIO_IMAGE if needed.
     image: ${MINIO_IMAGE:-cgr.dev/chainguard/minio:latest}
     command: ["server", "/data", "--console-address", ":9001"]
     ports:
-      - "9000:9000" # API S3
-      - "9001:9001" # consola web
+      - "9000:9000" # S3 API
+      - "9001:9001" # web console
     environment:
       MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
     volumes:
       - minio-data:/data
+    networks:
+      - data
     healthcheck:
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /minio/health/live HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && read -r l <&3 && [[ $${l} == *200* ]]"]
       interval: 5s
@@ -54,16 +66,18 @@ services:
     restart: unless-stopped
 
   backend:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
     environment:
-      # Vacío = sin autenticación. Si defines API_KEY, Prometheus no podrá
-      # hacer scrape de /metrics sin configurar la cabecera X-API-Key.
+      # Empty = auth off. If API_KEY is set, Prometheus cannot scrape /metrics
+      # unless the scrape config sends X-API-Key.
       API_KEY: ${API_KEY:-}
-      # Claves por tenant: "clave1:tenantA,clave2:tenantB" (vacío = solo API_KEY / sin auth)
+      # Per-tenant keys: "key1:tenantA,key2:tenantB" (empty = API_KEY only / no auth)
       TENANT_API_KEYS: ${TENANT_API_KEYS:-}
-      # Token de solo lectura para /ws (además de API_KEY); apto para el navegador
+      # Read-only token for /ws (in addition to API_KEY); safe to embed in the browser bundle
       WS_TOKEN: ${WS_TOKEN:-}
       RATE_LIMIT_RPS: ${RATE_LIMIT_RPS:-20}
       RATE_LIMIT_BURST: ${RATE_LIMIT_BURST:-40}
@@ -87,8 +101,8 @@ services:
       SHUTDOWN_TIMEOUT: ${SHUTDOWN_TIMEOUT:-25s}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       LOG_FORMAT: ${LOG_FORMAT:-text}
-      # Data lake: exportación periódica a Parquet (vacío S3_ENDPOINT = desactivada).
-      # Las credenciales por defecto son solo de desarrollo: define S3_ACCESS_KEY/S3_SECRET_KEY reales.
+      # Data lake: periodic Parquet export (empty S3_ENDPOINT disables it).
+      # Default credentials are for local development only.
       S3_ENDPOINT: ${S3_ENDPOINT:-minio:9000}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY:-minioadmin}
       S3_SECRET_KEY: ${S3_SECRET_KEY:-minioadmin}
@@ -108,18 +122,27 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    networks:
+      - data
+      - observability
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
       interval: 10s
       timeout: 3s
       retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
+      dockerfile: Dockerfile
       args:
-        # Se incrustan en el bundle (públicos): usa WS_TOKEN y una clave de tenant, no la de administración
+        # Baked into the public bundle: use WS_TOKEN and a tenant key, never the admin key
         VITE_WS_TOKEN: ${WS_TOKEN:-}
         VITE_INGEST_API_KEY: ${FRONTEND_INGEST_KEY:-}
         VITE_TENANT_ID: ${FRONTEND_TENANT_ID:-}
@@ -128,6 +151,14 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
     restart: unless-stopped
 
   prometheus:
@@ -137,9 +168,22 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
 
   grafana:
@@ -149,13 +193,29 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     depends_on:
-      - prometheus
+      prometheus:
+        condition: service_healthy
+    networks:
+      - observability
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
     restart: unless-stopped
+
+networks:
+  edge:
+  data:
+    internal: true
+  observability:
 
 volumes:
   nats-data:
