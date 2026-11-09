@@ -4,6 +4,18 @@ A high-concurrency Go microservice that accepts multi-tenant product events over
 
 Under Docker Compose the default path is **HTTP → NATS JetStream → a batch consumer → PostgreSQL**, with a background exporter writing Apache Parquet to MinIO. With `NATS_URL` unset, the process falls back to an in-memory worker pool so the API can run with nothing but the Go binary.
 
+## Vista previa
+
+El cliente Voke (`voke/`) en modo oscuro y claro.
+
+![Voke marketing: hero, lámpara y playground de código](./assets/screenshots/Captura%20de%20pantalla%20%283268%29.png)
+
+![Voke pricing: calculadora de tarifa plana y estado de modelos](./assets/screenshots/Captura%20de%20pantalla%20%283269%29.png)
+
+![Voke dashboard: overview de uso en modo oscuro](./assets/screenshots/Captura%20de%20pantalla%20%283270%29.png)
+
+![Voke playground: consola en modo claro](./assets/screenshots/Captura%20de%20pantalla%20%283271%29.png)
+
 ## 🚀 Guía de Ejecución Rápida
 
 El stack local se levanta con Docker Compose. Las imágenes del API y del dashboard se construyen en el propio proyecto. No hace falta un archivo `.env`: cada variable tiene un valor por defecto pensado para desarrollo local. Si quieres cambiar credenciales o límites, exporta las variables antes de `up` o colócalas en un `.env` en la raíz (`GRAFANA_USER`, `GRAFANA_PASSWORD`, `API_KEY`, `WS_TOKEN`, `FRONTEND_INGEST_KEY`, `FRONTEND_TENANT_ID`).
